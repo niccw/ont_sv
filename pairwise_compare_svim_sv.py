@@ -211,7 +211,7 @@ def check_overlap(key_list:list, support:int = 3, sv_len:int = 10):
                 except AttributeError:
                     subject_len = 0
 
-                if int(subject_support) >= support and int(subject_len) >= sv_len:
+                if int(subject_support) >= support and abs(int(subject_len)) >= sv_len:
                     # build subject_sample|sv_id|SUPPORT
                     subject_key_sv_id = f'{subject_key}|{sv_id}|{subject_support}|{subject_len}'
                     if subject_key_sv_id not in cnt_d:
@@ -231,7 +231,7 @@ def check_overlap(key_list:list, support:int = 3, sv_len:int = 10):
                         except AttributeError:
                             target_len = 0
 
-                        if int(target_support) >= support and subject_sv_type == target_sv_type and int(target_len) >= sv_len:
+                        if int(target_support) >= support and subject_sv_type == target_sv_type and abs(int(target_len)) >= sv_len:
                             target_sv_id = re.search(r'(?<=ID=).*?(?=;)',col[8])[0]
                             target_key_sv_id = f'{col[4]}|{target_sv_id}|{target_support}|{target_len}'
                             cnt_d[subject_key_sv_id].append(target_key_sv_id)
@@ -288,33 +288,63 @@ def check_overlap(key_list:list, support:int = 3, sv_len:int = 10):
             sv_set[k] = [sample_key_ls,blast_te,intersect_te]
 
     # report Summary of SV using key_combination_cntd
+    # base on the index on sorted_key_list
     with open(f'{out_dir}/key_combination_sv_cnt.tsv',"w") as o:
         o.write(f'##Directory: {args.folder}; Keys: {args.key_name}; INS padding size: {args.window}; min. support: {args.support}; min. svlen: {args.svlen}\n')
+        sorted_key_list_string = "\t".join(sorted_key_list)
+        o.write(f'##sv_type\tsv_id\t#blast_te\t#intersect_te\t{sorted_key_list_string}\n')
         for k,v in sv_set.items():
-            o.write(f'{",".join(v[0])}\t{",".join(k)}\t{";".join(v[1])}\t{";".join(v[2])}\n')
+            # v[0] is the sample key list (sorted list)
+            # create a cnt list of combination
+            sv_type = ""
+            l = [0] * len(sorted_key_list)
+            for sample in v[0]:
+                l[sorted_key_list.index(sample)] += 1
+            cnt_ls_string = "\t".join([str(i) for i in l])
+
+            sv_type = re.search(r'(?<=svim.).*?(?=.\d+)',k[0])[0]
+            
+            # set TE annotation as NA if they are empty
+            if (len(v[1]) == 0):
+                v[1] = "NA"
+            if (len(v[2]) == 0):
+                v[2] = "NA"
+
+            o.write(f'{sv_type}\t{",".join(k)}\t{";".join(v[1])}\t{";".join(v[2])}\t{cnt_ls_string}\n')
+            #o.write(f'{",".join(v[0])}\t{",".join(k)}\t{";".join(v[1])}\t{";".join(v[2])}\n')
         
 
 #parse the key_combination_sv_cnt.tsv and report the number of SV for each combination
-def final_summary(cnt_output:str = "key_combination_sv_cnt.tsv"):
+#TODO fix
+def final_summary(key_list:str,cnt_output:str = "key_combination_sv_cnt.tsv"):
+    sorted_key_ls = sorted(key_list)
     key_combination_d = {} # use tupple as key i.e. ('105', '3A')
     with open(f'{out_dir}/{cnt_output}',"r") as f:
         for line in f:
             if line.startswith("#"):
                 continue
-            [comb,sv_id] = line.strip().split("\t")[0:2]
-            comb = tuple(comb.split(","))
+            sv_id = line.strip().split("\t")[1]
+            comb_ls = line.strip().split("\t")[4:]
             sv_id = sv_id.split(",")
             sv_type = ""
             for i in sv_id:
                 [sample,svim_id,support,sv_len] = i.split("|")
                 i_sv_type = svim_id.split(".")[1]
-                if i_sv_type != sv_type: sv_type = i_sv_type
+                if i_sv_type != sv_type: sv_type = i_sv_type # mark down sv type
             if sv_type not in key_combination_d:
                 key_combination_d[sv_type] = {}
-            if comb not in key_combination_d[sv_type]:
-                key_combination_d[sv_type][comb] = 1
+
+
+            comb_string_ls = []
+            for i,sample in enumerate(comb_ls):
+                if int(sample) == 1:
+                    comb_string_ls.append(sorted_key_ls[i])
+            comb_tuple = tuple(sorted(comb_string_ls))
+            if comb_tuple not in key_combination_d[sv_type]:
+                key_combination_d[sv_type][comb_tuple] = 1
             else:
-                key_combination_d[sv_type][comb] += 1
+                key_combination_d[sv_type][comb_tuple] += 1
+
 
         with open(f'{out_dir}/summary.txt',"w") as f:
             for sv_type, comb_dict in key_combination_d.items():
@@ -358,7 +388,7 @@ if __name__ == "__main__":
     parser.add_argument("-f", type = str, dest= "folder",help = "folder containning all files needed", default= "")
     parser.add_argument("-k", dest= "key_name",help = "sample key name", nargs= "+")
     parser.add_argument("-w", type = int, dest= "window",help = "window size add to INS (default = 20)", default = 20)
-    parser.add_argument("-s", type = int, dest= "support",help = "min. support (default = 3)", default = 3)
+    parser.add_argument("-s", type = int, dest= "support",help = "min. support (default = 3)", default = 5)
     parser.add_argument("-l", type = int, dest= "svlen",help = "min. SVLEN (default = 10)", default = 10)
     args = parser.parse_args()
 
@@ -374,6 +404,6 @@ if __name__ == "__main__":
     # parse and summarise BED intersect output in <group>\t<[svid]>
     check_overlap(key_list = args.key_name, support = args.support, sv_len = args.svlen)
     # Do the counting
-    final_summary()
+    final_summary(key_list = args.key_name)
 
         
