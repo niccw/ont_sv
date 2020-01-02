@@ -28,10 +28,6 @@ def parse_out(out_path:str, ins_ls:list) -> list:
             
     return out_d
 
-            
-
-    pass
-
 def parse_bed(bed_path:str,min_len:int = 10,min_support:int = 3):
     """
     Parse the bed file (from bedtools intersect sv_bed te_bed)
